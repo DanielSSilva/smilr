@@ -26,7 +26,7 @@ stages:
 - stage: DeployACR
   displayName: 'Deploy to ACR'
   #dependsOn: 'build'
-  condition: eq(variables['Build.SourceBranch'], 'refs/heads/dev')
+  #condition: eq(variables['Build.SourceBranch'], 'refs/heads/dev')
   jobs:
     - job: BuildAndPush
       steps:
@@ -59,7 +59,7 @@ stages:
 - stage: DeployToDevAKS
   displayName: 'Deploy to AKS in DEV'
   #dependsOn: 'DeployACR'
-  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/dev'))
+  #condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/dev'))
   jobs:
   - deployment: deployToAKS
     displayName: Deploy to AKS
@@ -105,7 +105,7 @@ stages:
 - stage: DeployToPrdAKS
   displayName: 'Deploy to AKS in PRD'
   dependsOn: 'DeployToDevAKS'
-  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/dev'))
+  #condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/dev'))
   jobs:
   - deployment: deployToAKS
     displayName: Deploy to AKS
