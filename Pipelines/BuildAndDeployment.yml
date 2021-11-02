@@ -1,0 +1,149 @@
+#===========================================
+#   Based on Ben's original build pipeline
+#===========================================
+
+trigger:
+  branches:
+    include: 
+    - dev
+
+variables:
+  - name: releaseName
+    value: 'azdevopsseries-'
+  - name: chartPath
+    value: './kubernetes/helm/smilr'
+  - name: chartValues
+    value: './kubernetes/helm/smilr/values.yaml'
+  - name: azureResourceGroup
+    value: 'Demos'
+  - name: kubernetesCluster
+    value: 'aks-demo-ne-01'
+  
+pool:
+  name: SelfHostedPool
+
+stages:
+- stage: DeployACR
+  displayName: 'Deploy to ACR'
+  #dependsOn: 'build'
+  condition: eq(variables['Build.SourceBranch'], 'refs/heads/dev')
+  jobs:
+    - job: BuildAndPush
+      steps:
+      - task: Docker@2
+        displayName: Build and push the frontend
+        inputs:
+          command: buildAndPush
+          repository: 'smilr/frontend'
+          dockerfile: './node/frontend/Dockerfile'
+          containerRegistry: 'acr-devopsseries'
+          buildContext: $(Build.SourcesDirectory)
+          tags: |
+            latest
+            $(Build.BuildNumber)
+
+      - task: Docker@2
+        displayName: Build and push the api
+        inputs:
+          command: buildAndPush
+          repository: 'smilr/data-api'
+          dockerfile: './node/data-api/Dockerfile'
+          containerRegistry: 'acr-devopsseries'
+          buildContext: $(Build.SourcesDirectory)
+          tags: |
+            latest
+            $(Build.BuildNumber)
+
+
+### DEPLOY AKS DEV namespace
+- stage: DeployToDevAKS
+  displayName: 'Deploy to AKS in DEV'
+  #dependsOn: 'DeployACR'
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/dev'))
+  jobs:
+  - deployment: deployToAKS
+    displayName: Deploy to AKS
+    environment: 'AKS.dev'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - checkout: self
+        
+          - task: HelmInstaller@1
+            displayName: 'Install Helm version'
+            inputs:
+              helmVersionToInstall: latest
+    
+          - task: HelmDeploy@0
+            displayName: 'Helm add stable repo'
+            inputs:
+              azureResourceGroup: ${{ variables.azureResourceGroup }}
+              kubernetesCluster: ${{ variables.kubernetesCluster }}
+              command: repo
+              arguments: 'add stable https://charts.helm.sh/stable'
+
+          - task: HelmDeploy@0
+            displayName: 'Helm update chart dependencies'
+            inputs:
+              azureResourceGroup: ${{ variables.azureResourceGroup }}
+              kubernetesCluster: ${{ variables.kubernetesCluster }}
+              command: dependency
+              arguments: 'update ${{ variables.chartPath }}'
+
+          - task: HelmDeploy@0
+            displayName: 'Helm install chart'
+            inputs:
+              command: upgrade
+              releaseName: '${{ variables.releaseName }}dev'
+              chartType: FilePath
+              chartPath: ${{ variables.chartPath }}
+              valueFile: ${{ variables.chartValues }}
+              namespace: 'dev'
+              arguments: --set dataApi.imageTag=$(Build.BuildNumber)  --set frontend.imageTag=$(Build.BuildNumber)
+
+- stage: DeployToPrdAKS
+  displayName: 'Deploy to AKS in PRD'
+  dependsOn: 'DeployToDevAKS'
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/dev'))
+  jobs:
+  - deployment: deployToAKS
+    displayName: Deploy to AKS
+    environment: 'AKS.prd'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - checkout: self
+  
+          - task: HelmInstaller@1
+            displayName: 'Install Helm version'
+            inputs:
+              helmVersionToInstall: latest
+    
+          - task: HelmDeploy@0
+            displayName: 'Helm add stable repo'
+            inputs:
+              azureResourceGroup: ${{ variables.azureResourceGroup }}
+              kubernetesCluster: ${{ variables.kubernetesCluster }}
+              command: repo
+              arguments: 'add stable https://charts.helm.sh/stable'
+
+          - task: HelmDeploy@0
+            displayName: 'Helm update chart dependencies'
+            inputs:
+              azureResourceGroup: ${{ variables.azureResourceGroup }}
+              kubernetesCluster: ${{ variables.kubernetesCluster }}
+              command: dependency
+              arguments: 'update ${{ variables.chartPath }}'
+
+          - task: HelmDeploy@0
+            displayName: 'Helm install chart'
+            inputs:
+              command: upgrade
+              releaseName: '${{ variables.releaseName }}prd'
+              chartType: FilePath
+              chartPath: ${{ variables.chartPath }}
+              valueFile: ${{ variables.chartValues }}
+              namespace: 'prd'
+              arguments: --set dataApi.imageTag=$(Build.BuildNumber)  --set frontend.imageTag=$(Build.BuildNumber)
